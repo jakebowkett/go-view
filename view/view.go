@@ -13,6 +13,7 @@ import (
 
 type View struct {
 	templates   *template.Template
+	funcMap     map[string]interface{}
 	filePaths   map[string]string
 	BeforeParse func(ext, tmpl string) (newTmpl string)
 }
@@ -20,6 +21,7 @@ type View struct {
 func New(funcMap map[string]interface{}) *View {
 	return &View{
 		templates: template.New("").Funcs(funcMap),
+		funcMap:   funcMap,
 		filePaths: make(map[string]string),
 	}
 }
@@ -116,7 +118,7 @@ func (v *View) AddTemplate(alias, filePath string) error {
 		return err
 	}
 	v.templates = tmpl
-	v.filePaths = append(v.filePaths, filePath)
+	v.filePaths[alias] = filePath
 
 	return nil
 }
@@ -124,7 +126,7 @@ func (v *View) AddTemplate(alias, filePath string) error {
 func (v *View) Render(alias string, data interface{}) ([]byte, error) {
 
 	if filepath.Ext(alias) == "" {
-		return nil, errors.New(fmt.Sprintf("template alias %q has no file extension"))
+		return nil, errors.New(fmt.Sprintf("template alias %q has no file extension", alias))
 	}
 
 	tmpl := v.templates.Lookup(alias)
@@ -143,8 +145,36 @@ func (v *View) Render(alias string, data interface{}) ([]byte, error) {
 
 func (v *View) Refresh() (dropped []string) {
 
-	for alias, tmplName := range v.filePaths {
+	// Ensure dropped is non-nil for
+	// calls to v.delete
+	dropped = []string{}
 
+	v.templates = template.New("").Funcs(v.funcMap)
+
+	for alias, filePath := range v.filePaths {
+
+		info, err := os.Stat(filePath)
+		if err != nil {
+			dropped = append(dropped, alias)
+			continue
+		}
+
+		if !info.Mode().IsRegular() {
+			dropped = append(dropped, alias)
+			continue
+		}
+
+		f, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			dropped = append(dropped, alias)
+			continue
+		}
+
+		_, err = v.templates.New(alias).Parse(string(f))
+		if err != nil {
+			dropped = append(dropped, alias)
+		}
 	}
 
+	return dropped
 }

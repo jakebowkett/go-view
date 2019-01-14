@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type View struct {
+	mu          sync.RWMutex
 	templates   *template.Template
 	funcMap     map[string]interface{}
 	filePaths   map[string]string
@@ -129,13 +131,17 @@ func (v *View) Render(alias string, data interface{}) ([]byte, error) {
 		return nil, errors.New(fmt.Sprintf("template alias %q has no file extension", alias))
 	}
 
+	v.mu.RLock()
 	tmpl := v.templates.Lookup(alias)
+	v.mu.RUnlock()
 	if tmpl == nil {
 		return nil, errors.New(fmt.Sprintf("couldn't find template %q", alias))
 	}
 
 	var buf bytes.Buffer
+	v.mu.RLock()
 	err := tmpl.Execute(&buf, data)
+	v.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +155,9 @@ func (v *View) Refresh() (dropped []string) {
 	// calls to v.delete
 	dropped = []string{}
 
+	v.mu.Lock()
 	v.templates = template.New("").Funcs(v.funcMap)
+	v.mu.Unlock()
 
 	for alias, filePath := range v.filePaths {
 
@@ -170,10 +178,13 @@ func (v *View) Refresh() (dropped []string) {
 			continue
 		}
 
+		v.mu.Lock()
 		_, err = v.templates.New(alias).Parse(string(f))
+		v.mu.Unlock()
 		if err != nil {
 			dropped = append(dropped, alias)
 		}
+
 	}
 
 	return dropped

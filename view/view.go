@@ -13,11 +13,11 @@ import (
 )
 
 type View struct {
-	mu          sync.RWMutex
-	templates   *template.Template
-	funcMap     map[string]interface{}
-	filePaths   map[string]string
-	BeforeParse func(ext, tmpl string) (newTmpl string)
+	mu        sync.RWMutex
+	templates *template.Template
+	funcMap   map[string]interface{}
+	filePaths map[string]string
+	onLoad    func(ext string, tmpl []byte) (newTmpl []byte)
 }
 
 func New(funcMap map[string]interface{}) *View {
@@ -26,6 +26,18 @@ func New(funcMap map[string]interface{}) *View {
 		funcMap:   funcMap,
 		filePaths: make(map[string]string),
 	}
+}
+
+func (v *View) List() []string {
+	var ss []string
+	for s, _ := range v.filePaths {
+		ss = append(ss, s)
+	}
+	return ss
+}
+
+func (v *View) OnLoad(callback func(ext string, tmpl []byte) (newTmpl []byte)) {
+	v.onLoad = callback
 }
 
 func (v *View) MustAddDir(alias, dirPath string, exts []string, recursive bool) {
@@ -58,7 +70,7 @@ func (v *View) AddDir(alias, dirPath string, exts []string, recursive bool) erro
 		alias = strings.Trim(alias, "/")
 		dirPath := filepath.Join(dirPath, info.Name())
 
-		if info.IsDir() {
+		if info.IsDir() && recursive {
 			v.AddDir(alias, dirPath, exts, recursive)
 		}
 
@@ -110,8 +122,8 @@ func (v *View) AddTemplate(alias, filePath string) error {
 		return err
 	}
 
-	if v.BeforeParse != nil {
-		v.BeforeParse(filepath.Ext(filePath), string(f))
+	if v.onLoad != nil {
+		f = v.onLoad(filepath.Ext(filePath), f)
 	}
 
 	// Parse the currently named template.
@@ -127,9 +139,9 @@ func (v *View) AddTemplate(alias, filePath string) error {
 
 func (v *View) Render(alias string, data interface{}) ([]byte, error) {
 
-	if filepath.Ext(alias) == "" {
-		return nil, errors.New(fmt.Sprintf("template alias %q has no file extension", alias))
-	}
+	// if filepath.Ext(alias) == "" {
+	// 	return nil, errors.New(fmt.Sprintf("template alias %q has no file extension", alias))
+	// }
 
 	v.mu.RLock()
 	tmpl := v.templates.Lookup(alias)
@@ -176,6 +188,10 @@ func (v *View) Refresh() (dropped []string) {
 		if err != nil {
 			dropped = append(dropped, alias)
 			continue
+		}
+
+		if v.onLoad != nil {
+			f = v.onLoad(filepath.Ext(filePath), f)
 		}
 
 		v.mu.Lock()

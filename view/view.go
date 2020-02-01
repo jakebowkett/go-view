@@ -144,16 +144,15 @@ func (v *View) Render(alias string, data interface{}) ([]byte, error) {
 	// }
 
 	v.mu.RLock()
+	defer v.mu.RUnlock()
+
 	tmpl := v.templates.Lookup(alias)
-	v.mu.RUnlock()
 	if tmpl == nil {
 		return nil, errors.New(fmt.Sprintf("couldn't find template %q", alias))
 	}
 
 	var buf bytes.Buffer
-	v.mu.RLock()
 	err := tmpl.Execute(&buf, data)
-	v.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +167,9 @@ func (v *View) Refresh() (dropped []string) {
 	dropped = []string{}
 
 	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	v.templates = template.New("").Funcs(v.funcMap)
-	v.mu.Unlock()
 
 	for alias, filePath := range v.filePaths {
 
@@ -194,9 +194,7 @@ func (v *View) Refresh() (dropped []string) {
 			f = v.onLoad(filepath.Ext(filePath), f)
 		}
 
-		v.mu.Lock()
 		_, err = v.templates.New(alias).Parse(string(f))
-		v.mu.Unlock()
 		if err != nil {
 			dropped = append(dropped, alias)
 		}
